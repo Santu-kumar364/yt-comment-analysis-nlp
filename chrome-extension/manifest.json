@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Comment Analyzer",
+  "version": "2.0",
+  "description": "Analyze YouTube comments live - Now supports LAKHS of comments!",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "https://www.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_title": "YouTube Comment Analyzer"
+  }
+}
