@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 import asyncio
 from threading import Thread
+import os 
 
 app = FastAPI(title="YouTube Comment Analyzer API", version="2.0.0")
 
@@ -280,16 +281,18 @@ async def predict_sentiment_endpoint(request: SingleCommentRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 if __name__ == "__main__":
     import uvicorn
+    # Hugging Face Spaces uses port 7860
+    port = int(os.environ.get("PORT", 7860))
     print("\n" + "="*60)
-    print("🚀 YouTube Comment Analyzer API v2.0 - LAKHS SUPPORT")
+    print("🚀 YouTube Comment Analyzer API v2.0 - Hugging Face Edition")
     print("="*60)
-    print("Server starting on http://localhost:8000")
+    print(f"Server starting on http://0.0.0.0:{port}")
     print("✅ Supports 100,000+ comments with caching")
     print("✅ SQLite cache for faster subsequent analysis")
-    print("✅ Background jobs for large batches")
-    print("Press Ctrl+C to stop")
     print("="*60 + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=port)
+    
+    
