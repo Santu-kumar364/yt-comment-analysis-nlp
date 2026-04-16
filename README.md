@@ -51,7 +51,8 @@ A production-ready NLP system for analyzing YouTube comments at scale using Fast
 
 ## 📸 Demo
 
-![Application Screenshot](https://github.com/user-attachments/assets/e01ba6cc-c395-4ade-9a77-0d4069787b6e)
+<img width="1916" height="972" alt="Screenshot 2026-04-16 193224" src="https://github.com/user-attachments/assets/ebe6b194-2450-4069-bad1-a3d95b9fe9d8" />
+
 
 ---
 
