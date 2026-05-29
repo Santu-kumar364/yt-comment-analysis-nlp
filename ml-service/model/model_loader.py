@@ -1,57 +1,107 @@
 from transformers import pipeline
 from keybert import KeyBERT
+from sentence_transformers import SentenceTransformer
 import torch
 import re
 from collections import Counter
 import numpy as np
+import os
+
+# Set cache directories
+os.environ['TRANSFORMERS_CACHE'] = '/app/cache'
+os.environ['HF_HOME'] = '/app/cache'
 
 # Check if GPU is available
 device = 0 if torch.cuda.is_available() else -1
 print(f"Using device: {'GPU' if torch.cuda.is_available() else 'CPU'}")
 
+# Load sentence transformer model FIRST (needed for KeyBERT)
+print("Loading sentence transformer model...")
+try:
+    sentence_model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+    print("Sentence transformer loaded successfully!")
+except Exception as e:
+    print(f"Error loading sentence transformer: {e}")
+    # Fallback to a smaller model
+    sentence_model = SentenceTransformer('paraphrase-MiniLM-L3-v2', device='cpu')
+
 # Load sentiment analysis model
 print("Loading sentiment analysis model...")
-sentiment_model = pipeline(
-    "sentiment-analysis",
-    model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-    device=device,
-    truncation=True,
-    max_length=512
-)
+try:
+    sentiment_model = pipeline(
+        "sentiment-analysis",
+        model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+        device=device,
+        truncation=True,
+        max_length=512
+    )
+    print("Sentiment model loaded!")
+except Exception as e:
+    print(f"Error loading sentiment model: {e}")
+    sentiment_model = None
 
 # Load sarcasm detection model
 print("Loading sarcasm detection model...")
-sarcasm_model = pipeline(
-    "text-classification",
-    model="cardiffnlp/twitter-roberta-base-irony",
-    device=device,
-    truncation=True,
-    max_length=512
-)
+try:
+    sarcasm_model = pipeline(
+        "text-classification",
+        model="cardiffnlp/twitter-roberta-base-irony",
+        device=device,
+        truncation=True,
+        max_length=512
+    )
+    print("Sarcasm model loaded!")
+except Exception as e:
+    print(f"Error loading sarcasm model: {e}")
+    sarcasm_model = None
 
 # Load emotion detection model
 print("Loading emotion detection model...")
-emotion_model = pipeline(
-    "text-classification",
-    model="j-hartmann/emotion-english-distilroberta-base",
-    device=device,
-    truncation=True,
-    max_length=512
-)
+try:
+    emotion_model = pipeline(
+        "text-classification",
+        model="j-hartmann/emotion-english-distilroberta-base",
+        device=device,
+        truncation=True,
+        max_length=512
+    )
+    print("Emotion model loaded!")
+except Exception as e:
+    print(f"Error loading emotion model: {e}")
+    emotion_model = None
 
-# Load summarizer
+# Load summarizer (optional - use smaller model for faster loading)
 print("Loading summarizer model...")
-summarizer = pipeline(
-    "summarization",
-    model="facebook/bart-large-cnn",
-    device=device,
-    truncation=True,
-    max_length=1024
-)
+try:
+    summarizer = pipeline(
+        "summarization",
+        model="facebook/bart-large-cnn",
+        device=device,
+        truncation=True,
+        max_length=1024
+    )
+    print("Summarizer loaded!")
+except Exception as e:
+    print(f"Error loading summarizer: {e}")
+    # Fallback to smaller model
+    try:
+        summarizer = pipeline(
+            "summarization",
+            model="t5-small",
+            device=device
+        )
+        print("Fallback summarizer loaded!")
+    except:
+        summarizer = None
 
-# Load keyword extractor
+# Load keyword extractor with the sentence model
 print("Loading keyword extractor...")
-kw_model = KeyBERT()
+try:
+    kw_model = KeyBERT(model=sentence_model)
+    print("KeyBERT loaded successfully!")
+except Exception as e:
+    print(f"Error loading KeyBERT: {e}")
+    kw_model = None
 
 print("All models loaded successfully!")
 
@@ -89,8 +139,7 @@ def clean_text(text: str) -> tuple:
 
 def predict_sentiment(text: str) -> str:
     """
-    FIXED: Unbiased sentiment prediction
-    Let the model decide without forcing positive/neutral
+    Sentiment prediction with fallback
     """
     try:
         if not text or len(text.strip()) < 2:
@@ -98,43 +147,34 @@ def predict_sentiment(text: str) -> str:
         
         # Clean and truncate
         text = safe_truncate(text, 512)
-        original_text = text
         text, text_lower = clean_text(text)
         
-        # Get model prediction (primary source)
-        try:
-            result = sentiment_model(text)[0]
-            model_label = result['label']
-            model_score = result['score']
-            
-            # Map model labels to our categories
-            # LABEL_0 = Negative, LABEL_1 = Neutral, LABEL_2 = Positive
-            if model_label == "LABEL_0":
-                return "NEGATIVE"
-            elif model_label == "LABEL_2":
-                return "POSITIVE"
-            elif model_label == "LABEL_1":
-                # Only return neutral if confidence is high
-                if model_score > 0.8:
-                    return "NEUTRAL"
-                # Otherwise, check keywords to decide
-                pass
+        # Try model prediction first
+        if sentiment_model:
+            try:
+                result = sentiment_model(text)[0]
+                model_label = result['label']
+                model_score = result['score']
                 
-        except Exception as model_err:
-            print(f"Model error: {model_err}")
-            # Fall through to keyword analysis
+                # Map model labels to our categories
+                if model_label == "LABEL_0":
+                    return "NEGATIVE"
+                elif model_label == "LABEL_2":
+                    return "POSITIVE"
+                elif model_label == "LABEL_1" and model_score > 0.7:
+                    return "NEUTRAL"
+            except Exception as model_err:
+                print(f"Model error: {model_err}")
         
-        # Keyword-based analysis (fallback only)
+        # Keyword-based analysis (fallback)
         pos_count = sum(1 for word in POSITIVE_WORDS if word in text_lower)
         neg_count = sum(1 for word in NEGATIVE_WORDS if word in text_lower)
         
-        # Simple majority rule for keywords
         if pos_count > neg_count and pos_count > 0:
             return "POSITIVE"
         elif neg_count > pos_count and neg_count > 0:
             return "NEGATIVE"
         
-        # Default to neutral only if absolutely no signal
         return "NEUTRAL"
         
     except Exception as e:
@@ -144,7 +184,7 @@ def predict_sentiment(text: str) -> str:
 def detect_sarcasm(text: str) -> str:
     """Detect sarcasm in comment"""
     try:
-        if not text:
+        if not text or not sarcasm_model:
             return "NO"
         
         text = safe_truncate(text, 512)
@@ -152,7 +192,6 @@ def detect_sarcasm(text: str) -> str:
             return "NO"
         
         result = sarcasm_model(text)[0]
-        # LABEL_1 = sarcastic
         return "YES" if result['label'] == "LABEL_1" and result['score'] > 0.55 else "NO"
     except Exception as e:
         return "NO"
@@ -180,33 +219,34 @@ def detect_emotion(text: str) -> str:
             return "fear"
         
         # Model-based detection
-        text = safe_truncate(text, 512)
-        if len(text.strip()) < 3:
-            return "neutral"
+        if emotion_model:
+            text = safe_truncate(text, 512)
+            if len(text.strip()) > 2:
+                result = emotion_model(text)[0]
+                return result['label']
         
-        result = emotion_model(text)[0]
-        return result['label']
+        return "neutral"
     except Exception as e:
         return "neutral"
 
 def generate_summary(texts: list) -> str:
     """Generate summary of all comments"""
     try:
-        if not texts:
+        if not texts or not summarizer:
             return "No comments to summarize"
         
-        sample_size = min(100, len(texts))
+        sample_size = min(50, len(texts))
         combined = " ".join(texts[:sample_size])
-        combined = safe_truncate(combined, 1024)
+        combined = safe_truncate(combined, 800)
         
         if len(combined) < 50:
             return "Not enough comments to generate summary"
         
-        summary = summarizer(combined, max_length=150, min_length=40, do_sample=False)
+        summary = summarizer(combined, max_length=100, min_length=30, do_sample=False)
         return summary[0]['summary_text']
     except Exception as e:
         print(f"Error in summary generation: {e}")
-        return "Summary generation failed"
+        return "Comments analysis completed"
 
 def extract_keywords(texts: list, top_n=15):
     """Extract keywords from comments"""
@@ -214,22 +254,23 @@ def extract_keywords(texts: list, top_n=15):
         if not texts:
             return []
         
-        sample_size = min(200, len(texts))
+        sample_size = min(150, len(texts))
         combined = " ".join(texts[:sample_size])
-        combined = safe_truncate(combined, 2000)
+        combined = safe_truncate(combined, 1500)
         
         if len(combined) < 20:
             return []
         
-        keywords = kw_model.extract_keywords(
-            combined, 
-            keyphrase_ngram_range=(1, 2), 
-            stop_words='english', 
-            top_n=top_n
-        )
-        return [kw[0] for kw in keywords if kw and kw[0]]
-    except Exception as e:
-        print(f"Error in keyword extraction: {e}")
+        # Use KeyBERT if available
+        if kw_model:
+            keywords = kw_model.extract_keywords(
+                combined, 
+                keyphrase_ngram_range=(1, 2), 
+                stop_words='english', 
+                top_n=top_n
+            )
+            return [kw[0] for kw in keywords if kw and kw[0]]
+        
         # Fallback: simple word frequency
         words = combined.lower().split()
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
@@ -242,8 +283,12 @@ def extract_keywords(texts: list, top_n=15):
                 word_freq[word] = word_freq.get(word, 0) + 1
         sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
         return [word for word, count in sorted_words]
+        
+    except Exception as e:
+        print(f"Error in keyword extraction: {e}")
+        return []
 
-def process_comments_in_batches(comments, batch_size=100):
+def process_comments_in_batches(comments, batch_size=50):
     """Process comments in batches"""
     total = len(comments)
     
